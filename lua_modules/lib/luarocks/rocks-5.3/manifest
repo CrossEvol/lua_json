@@ -1,0 +1,77 @@
+commands = {
+   tsc = {
+      "telescope/0.6.0-1"
+   }
+}
+dependencies = {
+   say = {
+      ["1.4.1-3"] = {
+         {
+            constraints = {
+               {
+                  op = ">=",
+                  version = {
+                     5, 1, string = "5.1"
+                  }
+               }
+            },
+            name = "lua"
+         }
+      }
+   },
+   telescope = {
+      ["0.6.0-1"] = {
+         {
+            constraints = {
+               {
+                  op = ">=",
+                  version = {
+                     5, 1, string = "5.1"
+                  }
+               }
+            },
+            name = "lua"
+         }
+      }
+   }
+}
+modules = {
+   ["say.init"] = {
+      "say/1.4.1-3"
+   },
+   telescope = {
+      "telescope/0.6.0-1"
+   },
+   ["telescope.compat_env"] = {
+      "telescope/0.6.0-1"
+   }
+}
+repository = {
+   say = {
+      ["1.4.1-3"] = {
+         {
+            arch = "installed",
+            commands = {},
+            dependencies = {},
+            modules = {
+               ["say.init"] = "say/init.lua"
+            }
+         }
+      }
+   },
+   telescope = {
+      ["0.6.0-1"] = {
+         {
+            arch = "installed",
+            commands = {
+               tsc = "tsc"
+            },
+            dependencies = {},
+            modules = {
+               telescope = "telescope.lua",
+               ["telescope.compat_env"] = "telescope/compat_env.lua"
+            }
+         }
+      }
+   }
+}
