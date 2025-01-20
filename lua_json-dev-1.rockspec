@@ -15,5 +15,6 @@ build = {
    type = "builtin",
    modules = {
       add = "src\\add.lua"
+      lept_json = "src\\lept_json.lua
    }
 }
