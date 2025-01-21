@@ -98,6 +98,16 @@ local function jsonValue()
         _value = arr
     end
 
+    local function getObject()
+        assert(_type == NodeType.OBJECT, "Invalid type for object")
+        return _value
+    end
+
+    local function setObject(object)
+        _type = NodeType.OBJECT
+        _value = object
+    end
+
     -- Add methods to the self table
     self.setType = setType
     self.getType = getType
@@ -109,6 +119,8 @@ local function jsonValue()
     self.setString = setString
     self.setArray = setArray
     self.getArray = getArray
+    self.setObject = setObject
+    self.getObject = getObject
 
     return self
 end
@@ -605,11 +617,62 @@ function NewContext(jsonStr)
     end
 
     local function parseObject()
-        -- TODO: Implement object parsing
-        local v = jsonValue()
-        v.setType(NodeType.OBJECT)
+        if currentChar() ~= '{' then
+            setState(ParseResult.PARSE_MISS_COMMA_OR_CURLY_BRACKET)
+            error(ParseResult.PARSE_MISS_COMMA_OR_CURLY_BRACKET)
+        end
+        forward()
+        skipWhitespace()
 
-        return v
+        if currentChar() == '}' then
+            forward()
+            local v = jsonValue()
+            v.setObject({})
+            return v
+        end
+
+        local object = {}
+        while true do
+            if currentChar() ~= '"' then
+                setState(ParseResult.PARSE_MISS_KEY)
+                error(ParseResult.PARSE_MISS_KEY)
+            end
+            local success, key = pcall(parseString)
+            if not success then
+                setState(ParseResult.PARSE_INVALID_VALUE)
+                error(ParseResult.PARSE_INVALID_VALUE)
+            end
+            skipWhitespace()
+            if currentChar() ~= ':' then
+                setState(ParseResult.PARSE_MISS_COLON)
+                error(ParseResult.PARSE_MISS_COLON)
+            end
+            forward()
+            skipWhitespace()
+            local success, value = pcall(ParseValue)
+            if not success then
+                setState(ParseResult.PARSE_INVALID_VALUE)
+                error(ParseResult.PARSE_INVALID_VALUE)
+            end
+            object[key.getString()] = value
+            skipWhitespace()
+            if currentChar() == ',' then
+                forward()
+                skipWhitespace()
+                if terminative() then
+                    setState(ParseResult.PARSE_MISS_KEY)
+                    error(ParseResult.PARSE_MISS_KEY)
+                end
+            elseif currentChar() == '}' then
+                forward()
+                local v = jsonValue()
+                v.setObject(object)
+                return v
+            else
+                setState(ParseResult.PARSE_MISS_COMMA_OR_CURLY_BRACKET)
+                error(ParseResult.PARSE_MISS_COMMA_OR_CURLY_BRACKET)
+            end
+        end
     end
 
     function ParseValue()
