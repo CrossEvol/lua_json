@@ -9,6 +9,18 @@ local NodeType = {
     "OBJECT"
 }
 
+local NumberState = {
+    BEGIN        = 0x1,
+    NEGATIVE     = 0x2,
+    ZERO         = 0x3,
+    DIGIT        = 0x4,
+    DIGIT_1_TO_9 = 0x5,
+    DOT          = 0x6,
+    EXPONENT     = 0x7,
+    SYMBOL       = 0x8,
+    END          = 0x9,
+};
+
 local ErrorCodes = {
     OutOfRange = 101
 }
@@ -139,6 +151,19 @@ function NewContext(jsonStr)
         return ch
     end
 
+    local function forward()
+        context.stack[context.top] = currentChar()
+        context.index              = context.index + 1
+        context.size               = context.size + 1
+        context.top                = context.top + 1
+    end
+
+    local function resetStack()
+        context.stack = {}
+        context.size = 1
+        context.top = 1
+    end
+
     local function setState(newState)
         context.state = newState
     end
@@ -197,11 +222,188 @@ function NewContext(jsonStr)
     end
 
     local function parseNumber()
-        -- TODO: Implement number parsing
-        local v = jsonValue()
-        v.setType(NodeType.NUMBER)
+        local state = NumberState.BEGIN
+        local hasDot = false
+        local hasExponent = false
+        while true do
+            if state == NumberState.BEGIN then
+                if currentChar() == '-' then
+                    state = NumberState.NEGATIVE
+                elseif currentChar() == '0' then
+                    state = NumberState.ZERO
+                elseif isDigit1To9(currentChar()) then
+                    state = NumberState.DIGIT_1_TO_9
+                else
+                    error(ParseResult.PARSE_INVALID_VALUE)
+                end
+                forward()
+            elseif state == NumberState.NEGATIVE then
+                if currentChar() == '0' then
+                    state = NumberState.ZERO
+                elseif isDigit1To9(currentChar()) then
+                    state = NumberState.DIGIT_1_TO_9
+                else
+                    error(ParseResult.PARSE_INVALID_VALUE)
+                end
+                forward()
+            elseif state == NumberState.ZERO then
+                if currentChar() == 'e' or currentChar() == 'E' then
+                    if hasExponent then
+                        error("")
+                    end
+                    state = NumberState.EXPONENT
+                    forward()
+                elseif currentChar() == '.' then
+                    if hasDot then
+                        error(ParseResult.PARSE_INVALID_VALUE)
+                    end
+                    state = NumberState.DOT
+                    forward()
+                else
+                    state = NumberState.END -- when end , can not forward
+                end
+            elseif state == NumberState.DIGIT_1_TO_9 then
+                if currentChar() == 'e' or currentChar() == 'E' then
+                    if hasExponent then
+                        error(ParseResult.PARSE_INVALID_VALUE)
+                    end
+                    state = NumberState.EXPONENT
+                    forward()
+                elseif currentChar() == '.' then
+                    if hasDot then
+                        error(ParseResult.PARSE_INVALID_VALUE)
+                    end
+                    state = NumberState.DOT
+                    forward()
+                elseif isDigit(currentChar()) then
+                    state = NumberState.DIGIT
+                    forward()
+                else
+                    state = NumberState.END -- when end , can not forward
+                end
+            elseif state == NumberState.DOT then
+                hasDot = true
+                if isDigit(currentChar()) then
+                    state = NumberState.DIGIT
+                else
+                    error(ParseResult.PARSE_INVALID_VALUE)
+                end
+                forward()
+            elseif state == NumberState.DIGIT then
+                while isDigit(currentChar()) do
+                    forward()
+                end
+                if currentChar() == 'e' or currentChar() == 'E' then
+                    if hasExponent then
+                        error(ParseResult.PARSE_INVALID_VALUE)
+                    end
+                    state = NumberState.EXPONENT
+                    forward()
+                elseif currentChar() == '.' then
+                    if hasDot then
+                        error(ParseResult.PARSE_INVALID_VALUE)
+                    end
+                    state = NumberState.DOT
+                    forward()
+                else
+                    state = NumberState.END -- when end , can not forward
+                end
+            elseif state == NumberState.EXPONENT then
+                hasExponent = true
+                if currentChar() == '+' or currentChar() == '-' then
+                    state = NumberState.SYMBOL
+                elseif isDigit(currentChar()) then
+                    state = NumberState.DIGIT
+                else
+                    error(ParseResult.PARSE_INVALID_VALUE)
+                end
+                forward()
+            elseif state == NumberState.SYMBOL then
+                if isDigit(currentChar()) then
+                    state = NumberState.DIGIT
+                else
+                    error(ParseResult.PARSE_INVALID_VALUE)
+                end
+                forward()
+            elseif state == NumberState.END then
+                local numberString = table.concat(context.stack)
 
-        return v
+                -- Check if it's an integer (no decimal point or scientific notation)
+                local isInteger = not string.find(numberString, "[%.eE]")
+
+                if isInteger then
+                    -- For integers, check string length first to prevent overflow
+                    local isNegative = numberString:sub(1, 1) == "-"
+                    local digitString = isNegative and numberString:sub(2) or numberString
+
+                    -- Check if the integer has too many digits
+                    -- 2^53 is 16 digits long, so we can use this as a quick check
+                    if #digitString > 16 then
+                        error(ParseResult.PARSE_NUMBER_TOO_BIG)
+                    end
+
+                    -- For numbers that might be close to the limit, check the actual value
+                    if #digitString == 16 then
+                        local MAX_SAFE_INTEGER_STR = "9007199254740991"
+
+                        -- Compare string lengths first
+                        if #digitString > #MAX_SAFE_INTEGER_STR then
+                            error(ParseResult.PARSE_NUMBER_TOO_BIG)
+                        end
+
+                        -- If same length, compare digit by digit
+                        if #digitString == #MAX_SAFE_INTEGER_STR then
+                            if isNegative then
+                                -- For negative numbers, we can use the same comparison
+                                -- as -9007199254740991 is the lower limit
+                                if digitString > MAX_SAFE_INTEGER_STR then
+                                    error(ParseResult.PARSE_NUMBER_TOO_BIG)
+                                end
+                            else
+                                if digitString > MAX_SAFE_INTEGER_STR then
+                                    error(ParseResult.PARSE_NUMBER_TOO_BIG)
+                                end
+                            end
+                        end
+                    end
+                end
+
+                -- Now safe to convert to number
+                local numberValue = tonumber(numberString)
+                if not numberValue then
+                    error(ParseResult.PARSE_INVALID_VALUE)
+                end
+
+                -- Handle floating point numbers
+                if not isInteger then
+                    if string.find(numberString, "[eE]") then
+                        -- Handle scientific notation
+                        local _, _, base, exp = string.find(numberString, "([%-%.%d]+)[eE]([%-+]?%d+)")
+                        if base and exp then
+                            exp = tonumber(exp)
+                            if exp and exp > 308 then
+                                error(ParseResult.PARSE_NUMBER_TOO_BIG)
+                            end
+                        end
+                    else
+                        -- Handle regular floating point numbers
+                        local absValue = math.abs(numberValue)
+                        if absValue > 1.79769313486231570e+308 then
+                            error(ParseResult.PARSE_NUMBER_TOO_BIG)
+                        end
+                    end
+                end
+
+                local v = jsonValue()
+                v.setType(NodeType.NUMBER)
+                v.setNumber(numberValue)
+                resetStack() -- if get valid value, should clear the stack
+
+                return v
+            else
+                error(ParseResult.PARSE_INVALID_VALUE)
+            end
+        end
     end
 
     local function parseString()
