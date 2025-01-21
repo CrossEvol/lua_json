@@ -33,7 +33,7 @@ test: $(TEST_TARGETS)
 	@echo "All tests completed"
 
 # Run all tests
-ta: parse_literal_spec parse_number_spec
+ta: parse_literal_spec parse_number_spec parse_string_spec
 	@echo "All tests completed"
 
 # Pattern rule for test files

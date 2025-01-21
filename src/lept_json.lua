@@ -5,10 +5,10 @@ local NodeType = {
     NUMBER = "NUMBER",
     STRING = "STRING",
     ARRAY = "ARRAY",
-    OBJECT =
-    "OBJECT"
+    OBJECT = "OBJECT",
 }
 
+-- as a state machine for parse number
 local NumberState = {
     BEGIN        = 0x1,
     NEGATIVE     = 0x2,
@@ -110,10 +110,10 @@ end
 
 function Parse(jsonStr)
     local ctx = NewContext(jsonStr)
-    ctx.parseWhitespace()
+    ctx.skipWhitespace()
     local v = ctx.parseValue()
     if ctx.getState() == ParseResult.PARSE_OK then
-        ctx.parseWhitespace()
+        ctx.skipWhitespace()
         if not ctx.terminative() then
             v.setType(NodeType.NULL)
             ctx.setState(ParseResult.PARSE_ROOT_NOT_SINGULAR)
@@ -136,12 +136,10 @@ function NewContext(jsonStr)
         json = jsonStr,
         index = 1,
         stack = {},
-        size = 1,
-        top = 1,
         state = ParseResult.PARSE_OK,
     }
 
-    -- Private methods
+    -- @raise OutOfRange when index over length of jsonString
     local function currentChar()
         if context.index > string.len(context.json) + 1 then
             error({ code = ErrorCodes.OutOfRange })
@@ -151,17 +149,31 @@ function NewContext(jsonStr)
         return ch
     end
 
+    -- consume()  -- without incremental for stack and move to next position,
     local function forward()
-        context.stack[context.top] = currentChar()
-        context.index              = context.index + 1
-        context.size               = context.size + 1
-        context.top                = context.top + 1
+        context.index = context.index + 1
+    end
+
+    -- consume()  -- put the current char to the stack and move to next position
+    local function consume()
+        context.stack[#context.stack + 1] = currentChar()
+        context.index                     = context.index + 1
+    end
+
+    -- add the char to the tail of stack
+    local function push(ch)
+        context.stack[#context.stack + 1] = ch
+    end
+
+    -- retrieve the char from the top of the stack
+    local function pop()
+        local ch = context.stack[#context.stack]
+        context.stack[#context.stack] = nil
+        return ch
     end
 
     local function resetStack()
         context.stack = {}
-        context.size = 1
-        context.top = 1
     end
 
     local function setState(newState)
@@ -177,7 +189,7 @@ function NewContext(jsonStr)
     end
 
     local function isEmpty()
-        return context.top == 1
+        return #context.stack == 0
     end
 
     local function expect(ch)
@@ -194,10 +206,10 @@ function NewContext(jsonStr)
         return ch >= '1' and ch <= '9'
     end
 
-    local function parseWhitespace()
+    local function skipWhitespace()
         local ch = currentChar()
         while ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r' do
-            context.index = context.index + 1
+            forward()
             ch = currentChar()
         end
     end
@@ -234,50 +246,56 @@ function NewContext(jsonStr)
                 elseif isDigit1To9(currentChar()) then
                     state = NumberState.DIGIT_1_TO_9
                 else
+                    setState(ParseResult.PARSE_INVALID_VALUE)
                     error(ParseResult.PARSE_INVALID_VALUE)
                 end
-                forward()
+                consume()
             elseif state == NumberState.NEGATIVE then
                 if currentChar() == '0' then
                     state = NumberState.ZERO
                 elseif isDigit1To9(currentChar()) then
                     state = NumberState.DIGIT_1_TO_9
                 else
+                    setState(ParseResult.PARSE_INVALID_VALUE)
                     error(ParseResult.PARSE_INVALID_VALUE)
                 end
-                forward()
+                consume()
             elseif state == NumberState.ZERO then
                 if currentChar() == 'e' or currentChar() == 'E' then
                     if hasExponent then
-                        error("")
+                        setState(ParseResult.PARSE_INVALID_VALUE)
+                        error(ParseResult.PARSE_INVALID_VALUE)
                     end
                     state = NumberState.EXPONENT
-                    forward()
+                    consume()
                 elseif currentChar() == '.' then
                     if hasDot then
+                        setState(ParseResult.PARSE_INVALID_VALUE)
                         error(ParseResult.PARSE_INVALID_VALUE)
                     end
                     state = NumberState.DOT
-                    forward()
+                    consume()
                 else
                     state = NumberState.END -- when end , can not forward
                 end
             elseif state == NumberState.DIGIT_1_TO_9 then
                 if currentChar() == 'e' or currentChar() == 'E' then
                     if hasExponent then
+                        setState(ParseResult.PARSE_INVALID_VALUE)
                         error(ParseResult.PARSE_INVALID_VALUE)
                     end
                     state = NumberState.EXPONENT
-                    forward()
+                    consume()
                 elseif currentChar() == '.' then
                     if hasDot then
+                        setState(ParseResult.PARSE_INVALID_VALUE)
                         error(ParseResult.PARSE_INVALID_VALUE)
                     end
                     state = NumberState.DOT
-                    forward()
+                    consume()
                 elseif isDigit(currentChar()) then
                     state = NumberState.DIGIT
-                    forward()
+                    consume()
                 else
                     state = NumberState.END -- when end , can not forward
                 end
@@ -286,25 +304,28 @@ function NewContext(jsonStr)
                 if isDigit(currentChar()) then
                     state = NumberState.DIGIT
                 else
+                    setState(ParseResult.PARSE_INVALID_VALUE)
                     error(ParseResult.PARSE_INVALID_VALUE)
                 end
-                forward()
+                consume()
             elseif state == NumberState.DIGIT then
                 while isDigit(currentChar()) do
-                    forward()
+                    consume()
                 end
                 if currentChar() == 'e' or currentChar() == 'E' then
                     if hasExponent then
+                        setState(ParseResult.PARSE_INVALID_VALUE)
                         error(ParseResult.PARSE_INVALID_VALUE)
                     end
                     state = NumberState.EXPONENT
-                    forward()
+                    consume()
                 elseif currentChar() == '.' then
                     if hasDot then
+                        setState(ParseResult.PARSE_INVALID_VALUE)
                         error(ParseResult.PARSE_INVALID_VALUE)
                     end
                     state = NumberState.DOT
-                    forward()
+                    consume()
                 else
                     state = NumberState.END -- when end , can not forward
                 end
@@ -315,16 +336,18 @@ function NewContext(jsonStr)
                 elseif isDigit(currentChar()) then
                     state = NumberState.DIGIT
                 else
+                    setState(ParseResult.PARSE_INVALID_VALUE)
                     error(ParseResult.PARSE_INVALID_VALUE)
                 end
-                forward()
+                consume()
             elseif state == NumberState.SYMBOL then
                 if isDigit(currentChar()) then
                     state = NumberState.DIGIT
                 else
+                    setState(ParseResult.PARSE_INVALID_VALUE)
                     error(ParseResult.PARSE_INVALID_VALUE)
                 end
-                forward()
+                consume()
             elseif state == NumberState.END then
                 local numberString = table.concat(context.stack)
 
@@ -339,6 +362,7 @@ function NewContext(jsonStr)
                     -- Check if the integer has too many digits
                     -- 2^53 is 16 digits long, so we can use this as a quick check
                     if #digitString > 16 then
+                        setState(ParseResult.PARSE_NUMBER_TOO_BIG)
                         error(ParseResult.PARSE_NUMBER_TOO_BIG)
                     end
 
@@ -348,6 +372,7 @@ function NewContext(jsonStr)
 
                         -- Compare string lengths first
                         if #digitString > #MAX_SAFE_INTEGER_STR then
+                            setState(ParseResult.PARSE_NUMBER_TOO_BIG)
                             error(ParseResult.PARSE_NUMBER_TOO_BIG)
                         end
 
@@ -357,10 +382,12 @@ function NewContext(jsonStr)
                                 -- For negative numbers, we can use the same comparison
                                 -- as -9007199254740991 is the lower limit
                                 if digitString > MAX_SAFE_INTEGER_STR then
+                                    setState(ParseResult.PARSE_NUMBER_TOO_BIG)
                                     error(ParseResult.PARSE_NUMBER_TOO_BIG)
                                 end
                             else
                                 if digitString > MAX_SAFE_INTEGER_STR then
+                                    setState(ParseResult.PARSE_NUMBER_TOO_BIG)
                                     error(ParseResult.PARSE_NUMBER_TOO_BIG)
                                 end
                             end
@@ -371,6 +398,7 @@ function NewContext(jsonStr)
                 -- Now safe to convert to number
                 local numberValue = tonumber(numberString)
                 if not numberValue then
+                    setState(ParseResult.PARSE_INVALID_VALUE)
                     error(ParseResult.PARSE_INVALID_VALUE)
                 end
 
@@ -382,6 +410,7 @@ function NewContext(jsonStr)
                         if base and exp then
                             exp = tonumber(exp)
                             if exp and exp > 308 then
+                                setState(ParseResult.PARSE_NUMBER_TOO_BIG)
                                 error(ParseResult.PARSE_NUMBER_TOO_BIG)
                             end
                         end
@@ -389,6 +418,7 @@ function NewContext(jsonStr)
                         -- Handle regular floating point numbers
                         local absValue = math.abs(numberValue)
                         if absValue > 1.79769313486231570e+308 then
+                            setState(ParseResult.PARSE_NUMBER_TOO_BIG)
                             error(ParseResult.PARSE_NUMBER_TOO_BIG)
                         end
                     end
@@ -401,17 +431,136 @@ function NewContext(jsonStr)
 
                 return v
             else
+                setState(ParseResult.PARSE_INVALID_VALUE)
                 error(ParseResult.PARSE_INVALID_VALUE)
             end
         end
     end
 
-    local function parseString()
-        -- TODO: Implement string parsing
-        local v = jsonValue()
-        v.setType(NodeType.STRING)
+    local function parseHex4()
+        local u = 0
+        for _ = 1, 4, 1 do
+            local ch = currentChar()
+            u        = u << 4
+            if ch >= '0' and ch <= '9' then
+                u = u | (string.byte(ch) - string.byte('0'))
+            elseif ch >= 'A' and ch <= 'F' then
+                u = u | (string.byte(ch) - (string.byte('A') - 10))
+            elseif ch >= 'a' and ch <= 'f' then
+                u = u | (string.byte(ch) - (string.byte('a') - 10))
+            else
+                error(ParseResult.PARSE_INVALID_UNICODE_HEX)
+            end
+            forward()
+        end
+        return u
+    end
 
-        return v
+    local function encodeUTF8(u)
+        if u <= 0x7F then
+            -- 1-byte sequence
+            push(string.char(u & 0xFF))
+        elseif u <= 0x7FF then
+            -- 2-byte sequence
+            push(string.char(0xC0 | ((u >> 6) & 0xFF)))
+            push(string.char(0x80 | (u & 0x3F)))
+        elseif u <= 0xFFFF then
+            -- 3-byte sequence
+            push(string.char(0xE0 | ((u >> 12) & 0xFF)))
+            push(string.char(0x80 | ((u >> 6) & 0x3F)))
+            push(string.char(0x80 | (u & 0x3F)))
+        elseif u <= 0x10FFFF then
+            -- 4-byte sequence
+            push(string.char(0xF0 | ((u >> 18) & 0xFF)))
+            push(string.char(0x80 | ((u >> 12) & 0x3F)))
+            push(string.char(0x80 | ((u >> 6) & 0x3F)))
+            push(string.char(0x80 | (u & 0x3F)))
+        else
+            setState(ParseResult.PARSE_INVALID_UNICODE_HEX)
+            error(ParseResult.PARSE_INVALID_UNICODE_HEX)
+        end
+    end
+
+
+    local function parseUnicodeChars()
+        local u1 = parseHex4()
+        if u1 > 0xD800 and u1 < 0xDBFF then
+            if terminative() or currentChar() ~= '\\' then
+                setState(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
+                error(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
+            end
+            forward()
+            if terminative() or currentChar() ~= 'u' then
+                setState(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
+                error(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
+            end
+            forward()
+
+            local u2 = parseHex4()
+            if u2 < 0xDC00 or u2 > 0xDFFF then
+                setState(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
+                error(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
+            end
+
+            local u = (((u1 - 0xD800) << 10) | (u2 - 0xDC00)) + 0x10000
+            return encodeUTF8(u)
+        else
+            return encodeUTF8(u1)
+        end
+    end
+
+    local function parseString()
+        expect('"')
+
+        while true do
+            local ch = currentChar()
+            if ch == '"' then
+                forward()
+                local v = jsonValue()
+                v.setType(NodeType.STRING)
+                v.setString(table.concat(context.stack))
+                resetStack()
+
+                return v
+            elseif ch == '\\' then
+                forward()
+                ch = currentChar()
+                if ch == '"' then
+                    consume()
+                elseif ch == '\\' then
+                    consume()
+                elseif ch == '/' then
+                    consume()
+                elseif ch == 'b' then
+                    push('\b')
+                    forward()
+                elseif ch == 'f' then
+                    push('\f')
+                    forward()
+                elseif ch == 'n' then
+                    push('\n')
+                    forward()
+                elseif ch == 'r' then
+                    push('\r')
+                    forward()
+                elseif ch == 't' then
+                    push('\t')
+                    forward()
+                elseif ch == 'u' then
+                    forward()
+                    parseUnicodeChars()
+                else
+                    setState(ParseResult.PARSE_INVALID_STRING_ESCAPE)
+                    error(ParseResult.PARSE_INVALID_STRING_ESCAPE)
+                end
+            else
+                if string.byte(ch) < 0x20 then
+                    setState(ParseResult.PARSE_INVALID_STRING_CHAR)
+                    error(ParseResult.PARSE_INVALID_STRING_CHAR)
+                end
+                consume()
+            end
+        end
     end
 
     local function parseArray()
@@ -428,14 +577,6 @@ function NewContext(jsonStr)
         v.setType(NodeType.OBJECT)
 
         return v
-    end
-
-    local function push(byte)
-        -- TODO: Implement stack push
-    end
-
-    local function pop()
-        -- TODO: Implement stack pop
     end
 
     local function parseValue()
@@ -464,7 +605,7 @@ function NewContext(jsonStr)
     local self = {}
     self.setState = setState
     self.getState = getState
-    self.parseWhitespace = parseWhitespace
+    self.skipWhitespace = skipWhitespace
     self.parseValue = parseValue
     self.terminative = terminative
     self.isEmpty = isEmpty
