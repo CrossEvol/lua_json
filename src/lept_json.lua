@@ -88,6 +88,16 @@ local function jsonValue()
         _value = str
     end
 
+    local function getArray()
+        assert(_type == NodeType.ARRAY, "Invalid type for array")
+        return _value
+    end
+
+    local function setArray(arr)
+        _type = NodeType.ARRAY
+        _value = arr
+    end
+
     -- Add methods to the self table
     self.setType = setType
     self.getType = getType
@@ -97,6 +107,8 @@ local function jsonValue()
     self.setNumber = setNumber
     self.getString = getString
     self.setString = setString
+    self.setArray = setArray
+    self.getArray = getArray
 
     return self
 end
@@ -111,7 +123,7 @@ end
 function Parse(jsonStr)
     local ctx = NewContext(jsonStr)
     ctx.skipWhitespace()
-    local v = ctx.parseValue()
+    local v = ctx.ParseValue()
     if ctx.getState() == ParseResult.PARSE_OK then
         ctx.skipWhitespace()
         if not ctx.terminative() then
@@ -215,17 +227,15 @@ function NewContext(jsonStr)
     end
 
     local function parseLiteral(literal, type)
-        expect(literal:sub(1, 1))
-
         -- Check remaining characters
         for i = 1, #literal do
-            if context.json:sub(context.index + i - 1, context.index + i - 1) ~= literal:sub(i + 1, i + 1) then
+            if context.json:sub(context.index + i - 1, context.index + i - 1) ~= literal:sub(i, i) then
                 context.state = ParseResult.PARSE_INVALID_VALUE
                 error(ParseResult.PARSE_INVALID_VALUE)
             end
         end
 
-        context.index = context.index + #literal - 1
+        context.index = context.index + #literal
 
         local v = jsonValue()
         v.setType(type)
@@ -564,11 +574,34 @@ function NewContext(jsonStr)
     end
 
     local function parseArray()
-        -- TODO: Implement array parsing
-        local v = jsonValue()
-        v.setType(NodeType.ARRAY)
-
-        return v
+        expect('[')
+        skipWhitespace()
+        if currentChar() == ']' then
+            forward()
+            local v = jsonValue()
+            v.setArray({})
+            return v
+        end
+        local arr = {}
+        while true do
+            local success, result = pcall(ParseValue)
+            if success then
+                arr[#arr + 1] = result
+                skipWhitespace()
+            end
+            if currentChar() == ',' then
+                forward()
+                skipWhitespace()
+            elseif currentChar() == ']' then
+                forward()
+                local v = jsonValue()
+                v.setArray(arr)
+                return v
+            else
+                setState(ParseResult.PARSE_MISS_COMMA_OR_SQUARE_BRACKET)
+                error(ParseResult.PARSE_MISS_COMMA_OR_SQUARE_BRACKET)
+            end
+        end
     end
 
     local function parseObject()
@@ -579,7 +612,7 @@ function NewContext(jsonStr)
         return v
     end
 
-    local function parseValue()
+    function ParseValue()
         local current_char = currentChar()
 
         if current_char == 't' then
@@ -606,7 +639,7 @@ function NewContext(jsonStr)
     self.setState = setState
     self.getState = getState
     self.skipWhitespace = skipWhitespace
-    self.parseValue = parseValue
+    self.ParseValue = ParseValue
     self.terminative = terminative
     self.isEmpty = isEmpty
     self.push = push
