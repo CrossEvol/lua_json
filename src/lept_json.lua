@@ -42,7 +42,6 @@ local ParseResult = {
     PARSE_MISS_COMMA_OR_CURLY_BRACKET  = "PARSE_MISS_COMMA_OR_CURLY_BRACKET"
 }
 
-
 local function jsonValue()
     -- Private attributes
     local _type = NodeType.NULL
@@ -135,17 +134,17 @@ end
 function Parse(jsonStr)
     local ctx = NewContext(jsonStr)
     ctx.skipWhitespace()
-    local v = ctx.ParseValue()
-    if ctx.getState() == ParseResult.PARSE_OK then
+    local success, result = pcall(ctx.ParseValue)
+    if success then
         ctx.skipWhitespace()
         if not ctx.terminative() then
-            v.setType(NodeType.NULL)
+            result.setType(NodeType.NULL)
             ctx.setState(ParseResult.PARSE_ROOT_NOT_SINGULAR)
         end
     end
     assert(ctx.isEmpty())
     return {
-        value = v,
+        value = success and result or jsonValue(),
         state = ctx.getState(),
     }
 end
@@ -162,6 +161,20 @@ function NewContext(jsonStr)
         stack = {},
         state = ParseResult.PARSE_OK,
     }
+
+    local function resetStack()
+        context.stack = {}
+    end
+
+    -- @param err : error should be member of ParseResult
+    -- set the context state to error and return table contains error as message
+    local function Raise(err)
+        context.state = err
+        resetStack()
+        error({
+            message = err
+        })
+    end
 
     -- @raise OutOfRange when index over length of jsonString
     local function currentChar()
@@ -194,10 +207,6 @@ function NewContext(jsonStr)
         local ch = context.stack[#context.stack]
         context.stack[#context.stack] = nil
         return ch
-    end
-
-    local function resetStack()
-        context.stack = {}
     end
 
     local function setState(newState)
@@ -242,8 +251,7 @@ function NewContext(jsonStr)
         -- Check remaining characters
         for i = 1, #literal do
             if context.json:sub(context.index + i - 1, context.index + i - 1) ~= literal:sub(i, i) then
-                context.state = ParseResult.PARSE_INVALID_VALUE
-                error(ParseResult.PARSE_INVALID_VALUE)
+                Raise(ParseResult.PARSE_INVALID_VALUE)
             end
         end
 
@@ -268,8 +276,7 @@ function NewContext(jsonStr)
                 elseif isDigit1To9(currentChar()) then
                     state = NumberState.DIGIT_1_TO_9
                 else
-                    setState(ParseResult.PARSE_INVALID_VALUE)
-                    error(ParseResult.PARSE_INVALID_VALUE)
+                    Raise(ParseResult.PARSE_INVALID_VALUE)
                 end
                 consume()
             elseif state == NumberState.NEGATIVE then
@@ -278,22 +285,19 @@ function NewContext(jsonStr)
                 elseif isDigit1To9(currentChar()) then
                     state = NumberState.DIGIT_1_TO_9
                 else
-                    setState(ParseResult.PARSE_INVALID_VALUE)
-                    error(ParseResult.PARSE_INVALID_VALUE)
+                    Raise(ParseResult.PARSE_INVALID_VALUE)
                 end
                 consume()
             elseif state == NumberState.ZERO then
                 if currentChar() == 'e' or currentChar() == 'E' then
                     if hasExponent then
-                        setState(ParseResult.PARSE_INVALID_VALUE)
-                        error(ParseResult.PARSE_INVALID_VALUE)
+                        Raise(ParseResult.PARSE_INVALID_VALUE)
                     end
                     state = NumberState.EXPONENT
                     consume()
                 elseif currentChar() == '.' then
                     if hasDot then
-                        setState(ParseResult.PARSE_INVALID_VALUE)
-                        error(ParseResult.PARSE_INVALID_VALUE)
+                        Raise(ParseResult.PARSE_INVALID_VALUE)
                     end
                     state = NumberState.DOT
                     consume()
@@ -303,15 +307,13 @@ function NewContext(jsonStr)
             elseif state == NumberState.DIGIT_1_TO_9 then
                 if currentChar() == 'e' or currentChar() == 'E' then
                     if hasExponent then
-                        setState(ParseResult.PARSE_INVALID_VALUE)
-                        error(ParseResult.PARSE_INVALID_VALUE)
+                        Raise(ParseResult.PARSE_INVALID_VALUE)
                     end
                     state = NumberState.EXPONENT
                     consume()
                 elseif currentChar() == '.' then
                     if hasDot then
-                        setState(ParseResult.PARSE_INVALID_VALUE)
-                        error(ParseResult.PARSE_INVALID_VALUE)
+                        Raise(ParseResult.PARSE_INVALID_VALUE)
                     end
                     state = NumberState.DOT
                     consume()
@@ -326,8 +328,7 @@ function NewContext(jsonStr)
                 if isDigit(currentChar()) then
                     state = NumberState.DIGIT
                 else
-                    setState(ParseResult.PARSE_INVALID_VALUE)
-                    error(ParseResult.PARSE_INVALID_VALUE)
+                    Raise(ParseResult.PARSE_INVALID_VALUE)
                 end
                 consume()
             elseif state == NumberState.DIGIT then
@@ -336,15 +337,13 @@ function NewContext(jsonStr)
                 end
                 if currentChar() == 'e' or currentChar() == 'E' then
                     if hasExponent then
-                        setState(ParseResult.PARSE_INVALID_VALUE)
-                        error(ParseResult.PARSE_INVALID_VALUE)
+                        Raise(ParseResult.PARSE_INVALID_VALUE)
                     end
                     state = NumberState.EXPONENT
                     consume()
                 elseif currentChar() == '.' then
                     if hasDot then
-                        setState(ParseResult.PARSE_INVALID_VALUE)
-                        error(ParseResult.PARSE_INVALID_VALUE)
+                        Raise(ParseResult.PARSE_INVALID_VALUE)
                     end
                     state = NumberState.DOT
                     consume()
@@ -358,16 +357,14 @@ function NewContext(jsonStr)
                 elseif isDigit(currentChar()) then
                     state = NumberState.DIGIT
                 else
-                    setState(ParseResult.PARSE_INVALID_VALUE)
-                    error(ParseResult.PARSE_INVALID_VALUE)
+                    Raise(ParseResult.PARSE_INVALID_VALUE)
                 end
                 consume()
             elseif state == NumberState.SYMBOL then
                 if isDigit(currentChar()) then
                     state = NumberState.DIGIT
                 else
-                    setState(ParseResult.PARSE_INVALID_VALUE)
-                    error(ParseResult.PARSE_INVALID_VALUE)
+                    Raise(ParseResult.PARSE_INVALID_VALUE)
                 end
                 consume()
             elseif state == NumberState.END then
@@ -384,8 +381,7 @@ function NewContext(jsonStr)
                     -- Check if the integer has too many digits
                     -- 2^53 is 16 digits long, so we can use this as a quick check
                     if #digitString > 16 then
-                        setState(ParseResult.PARSE_NUMBER_TOO_BIG)
-                        error(ParseResult.PARSE_NUMBER_TOO_BIG)
+                        Raise(ParseResult.PARSE_NUMBER_TOO_BIG)
                     end
 
                     -- For numbers that might be close to the limit, check the actual value
@@ -394,8 +390,7 @@ function NewContext(jsonStr)
 
                         -- Compare string lengths first
                         if #digitString > #MAX_SAFE_INTEGER_STR then
-                            setState(ParseResult.PARSE_NUMBER_TOO_BIG)
-                            error(ParseResult.PARSE_NUMBER_TOO_BIG)
+                            Raise(ParseResult.PARSE_NUMBER_TOO_BIG)
                         end
 
                         -- If same length, compare digit by digit
@@ -404,13 +399,11 @@ function NewContext(jsonStr)
                                 -- For negative numbers, we can use the same comparison
                                 -- as -9007199254740991 is the lower limit
                                 if digitString > MAX_SAFE_INTEGER_STR then
-                                    setState(ParseResult.PARSE_NUMBER_TOO_BIG)
-                                    error(ParseResult.PARSE_NUMBER_TOO_BIG)
+                                    Raise(ParseResult.PARSE_NUMBER_TOO_BIG)
                                 end
                             else
                                 if digitString > MAX_SAFE_INTEGER_STR then
-                                    setState(ParseResult.PARSE_NUMBER_TOO_BIG)
-                                    error(ParseResult.PARSE_NUMBER_TOO_BIG)
+                                    Raise(ParseResult.PARSE_NUMBER_TOO_BIG)
                                 end
                             end
                         end
@@ -420,8 +413,7 @@ function NewContext(jsonStr)
                 -- Now safe to convert to number
                 local numberValue = tonumber(numberString)
                 if not numberValue then
-                    setState(ParseResult.PARSE_INVALID_VALUE)
-                    error(ParseResult.PARSE_INVALID_VALUE)
+                    Raise(ParseResult.PARSE_INVALID_VALUE)
                 end
 
                 -- Handle floating point numbers
@@ -432,16 +424,14 @@ function NewContext(jsonStr)
                         if base and exp then
                             exp = tonumber(exp)
                             if exp and exp > 308 then
-                                setState(ParseResult.PARSE_NUMBER_TOO_BIG)
-                                error(ParseResult.PARSE_NUMBER_TOO_BIG)
+                                Raise(ParseResult.PARSE_NUMBER_TOO_BIG)
                             end
                         end
                     else
                         -- Handle regular floating point numbers
                         local absValue = math.abs(numberValue)
                         if absValue > 1.79769313486231570e+308 then
-                            setState(ParseResult.PARSE_NUMBER_TOO_BIG)
-                            error(ParseResult.PARSE_NUMBER_TOO_BIG)
+                            Raise(ParseResult.PARSE_NUMBER_TOO_BIG)
                         end
                     end
                 end
@@ -453,8 +443,7 @@ function NewContext(jsonStr)
 
                 return v
             else
-                setState(ParseResult.PARSE_INVALID_VALUE)
-                error(ParseResult.PARSE_INVALID_VALUE)
+                Raise(ParseResult.PARSE_INVALID_VALUE)
             end
         end
     end
@@ -471,7 +460,7 @@ function NewContext(jsonStr)
             elseif ch >= 'a' and ch <= 'f' then
                 u = u | (string.byte(ch) - (string.byte('a') - 10))
             else
-                error(ParseResult.PARSE_INVALID_UNICODE_HEX)
+                Raise(ParseResult.PARSE_INVALID_UNICODE_HEX)
             end
             forward()
         end
@@ -498,30 +487,26 @@ function NewContext(jsonStr)
             push(string.char(0x80 | ((u >> 6) & 0x3F)))
             push(string.char(0x80 | (u & 0x3F)))
         else
-            setState(ParseResult.PARSE_INVALID_UNICODE_HEX)
-            error(ParseResult.PARSE_INVALID_UNICODE_HEX)
+            Raise(ParseResult.PARSE_INVALID_UNICODE_HEX)
         end
     end
 
 
     local function parseUnicodeChars()
         local u1 = parseHex4()
-        if u1 > 0xD800 and u1 < 0xDBFF then
+        if u1 >= 0xD800 and u1 <= 0xDBFF then
             if terminative() or currentChar() ~= '\\' then
-                setState(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
-                error(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
+                Raise(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
             end
             forward()
             if terminative() or currentChar() ~= 'u' then
-                setState(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
-                error(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
+                Raise(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
             end
             forward()
 
             local u2 = parseHex4()
             if u2 < 0xDC00 or u2 > 0xDFFF then
-                setState(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
-                error(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
+                Raise(ParseResult.PARSE_INVALID_UNICODE_SURROGATE)
             end
 
             local u = (((u1 - 0xD800) << 10) | (u2 - 0xDC00)) + 0x10000
@@ -572,13 +557,13 @@ function NewContext(jsonStr)
                     forward()
                     parseUnicodeChars()
                 else
-                    setState(ParseResult.PARSE_INVALID_STRING_ESCAPE)
-                    error(ParseResult.PARSE_INVALID_STRING_ESCAPE)
+                    Raise(ParseResult.PARSE_INVALID_STRING_ESCAPE)
                 end
+            elseif ch == '' then
+                Raise(ParseResult.PARSE_MISS_QUOTATION_MARK)
             else
                 if string.byte(ch) < 0x20 then
-                    setState(ParseResult.PARSE_INVALID_STRING_CHAR)
-                    error(ParseResult.PARSE_INVALID_STRING_CHAR)
+                    Raise(ParseResult.PARSE_INVALID_STRING_CHAR)
                 end
                 consume()
             end
@@ -600,6 +585,8 @@ function NewContext(jsonStr)
             if success then
                 arr[#arr + 1] = result
                 skipWhitespace()
+            else
+                Raise(ParseResult.PARSE_INVALID_VALUE)
             end
             if currentChar() == ',' then
                 forward()
@@ -610,16 +597,14 @@ function NewContext(jsonStr)
                 v.setArray(arr)
                 return v
             else
-                setState(ParseResult.PARSE_MISS_COMMA_OR_SQUARE_BRACKET)
-                error(ParseResult.PARSE_MISS_COMMA_OR_SQUARE_BRACKET)
+                Raise(ParseResult.PARSE_MISS_COMMA_OR_SQUARE_BRACKET)
             end
         end
     end
 
     local function parseObject()
         if currentChar() ~= '{' then
-            setState(ParseResult.PARSE_MISS_COMMA_OR_CURLY_BRACKET)
-            error(ParseResult.PARSE_MISS_COMMA_OR_CURLY_BRACKET)
+            Raise(ParseResult.PARSE_MISS_COMMA_OR_CURLY_BRACKET)
         end
         forward()
         skipWhitespace()
@@ -634,25 +619,21 @@ function NewContext(jsonStr)
         local object = {}
         while true do
             if currentChar() ~= '"' then
-                setState(ParseResult.PARSE_MISS_KEY)
-                error(ParseResult.PARSE_MISS_KEY)
+                Raise(ParseResult.PARSE_MISS_KEY)
             end
             local success, key = pcall(parseString)
             if not success then
-                setState(ParseResult.PARSE_INVALID_VALUE)
-                error(ParseResult.PARSE_INVALID_VALUE)
+                Raise(ParseResult.PARSE_INVALID_VALUE)
             end
             skipWhitespace()
             if currentChar() ~= ':' then
-                setState(ParseResult.PARSE_MISS_COLON)
-                error(ParseResult.PARSE_MISS_COLON)
+                Raise(ParseResult.PARSE_MISS_COLON)
             end
             forward()
             skipWhitespace()
             local success, value = pcall(ParseValue)
             if not success then
-                setState(ParseResult.PARSE_INVALID_VALUE)
-                error(ParseResult.PARSE_INVALID_VALUE)
+                Raise(ParseResult.PARSE_INVALID_VALUE)
             end
             object[key.getString()] = value
             skipWhitespace()
@@ -660,8 +641,7 @@ function NewContext(jsonStr)
                 forward()
                 skipWhitespace()
                 if terminative() then
-                    setState(ParseResult.PARSE_MISS_KEY)
-                    error(ParseResult.PARSE_MISS_KEY)
+                    Raise(ParseResult.PARSE_MISS_KEY)
                 end
             elseif currentChar() == '}' then
                 forward()
@@ -669,8 +649,7 @@ function NewContext(jsonStr)
                 v.setObject(object)
                 return v
             else
-                setState(ParseResult.PARSE_MISS_COMMA_OR_CURLY_BRACKET)
-                error(ParseResult.PARSE_MISS_COMMA_OR_CURLY_BRACKET)
+                Raise(ParseResult.PARSE_MISS_COMMA_OR_CURLY_BRACKET)
             end
         end
     end
@@ -691,7 +670,7 @@ function NewContext(jsonStr)
         elseif current_char == '{' then
             return parseObject()
         elseif current_char == '' then
-            return ParseResult.PARSE_EXPECT_VALUE
+            Raise(ParseResult.PARSE_EXPECT_VALUE)
         else
             return parseNumber()
         end
