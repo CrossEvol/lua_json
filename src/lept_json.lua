@@ -21,6 +21,10 @@ local NumberState = {
     END          = 0x9,
 };
 
+local HexDigits = {
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
+}
+
 local ErrorCodes = {
     OutOfRange = 101
 }
@@ -28,6 +32,7 @@ local ErrorCodes = {
 local ParseResult = {
     PARSE_OK                           = "PARSE_OK",
     PARSE_EXPECT_VALUE                 = "PARSE_EXPECT_VALUE",
+    PARSE_INVALID_TYPE                 = "PARSE_INVALID_TYPE",
     PARSE_INVALID_VALUE                = "PARSE_INVALID_VALUE",
     PARSE_ROOT_NOT_SINGULAR            = "PARSE_ROOT_NOT_SINGULAR",
     PARSE_NUMBER_TOO_BIG               = "PARSE_NUMBER_TOO_BIG",
@@ -132,7 +137,7 @@ local function jsonPair(k, v)
 end
 
 function Parse(jsonStr)
-    local ctx = NewContext(jsonStr)
+    local ctx = NewDecodeContext(jsonStr)
     ctx.skipWhitespace()
     local success, result = pcall(ctx.ParseValue)
     if success then
@@ -149,11 +154,7 @@ function Parse(jsonStr)
     }
 end
 
-function Stringify(jsonValue)
-    return ""
-end
-
-function NewContext(jsonStr)
+function NewDecodeContext(jsonStr)
     -- Private attributes
     local context = {
         json = jsonStr,
@@ -690,8 +691,140 @@ function NewContext(jsonStr)
     return self
 end
 
+-- @param v : jsonValue in the memory
+function Stringify(v)
+    local ctx = NewEncodeContext()
+    local valueType = v.getType()
+    if valueType == NodeType.NULL then
+        ctx.pushString("null")
+    elseif valueType == NodeType.FALSE then
+        ctx.pushString("false")
+    elseif valueType == NodeType.TRUE then
+        ctx.pushString("true")
+    elseif valueType == NodeType.NUMBER then
+        local num = v.getNumber()
+        ctx.pushString(string.format("%.17g", num))
+    elseif valueType == NodeType.STRING then
+        local str = v.getString()
+        ctx.push('"')
+        for i = 1, string.len(str), 1 do
+            local ch = str:sub(i, i)
+            if ch == '\"' then
+                ctx.push('\\')
+                ctx.push('\"')
+            elseif ch == '\\' then
+                ctx.push('\\')
+                ctx.push('\\')
+            elseif ch == '\b' then
+                ctx.push('\\')
+                ctx.push('\b')
+            elseif ch == '\f' then
+                ctx.push('\\')
+                ctx.push('\f')
+            elseif ch == '\n' then
+                ctx.push('\\')
+                ctx.push('\n')
+            elseif ch == '\r' then
+                ctx.push('\\')
+                ctx.push('\r')
+            elseif ch == '\t' then
+                ctx.push('\\')
+                ctx.push('\t')
+            else
+                if string.byte(ch) < 0x20 then
+                    ctx.push('\\')
+                    ctx.push('u')
+                    ctx.push('0')
+                    ctx.push('0')
+                    ctx.push(HexDigits[(string.byte(ch) >> 4) + 1])
+                    ctx.push(HexDigits[(string.byte(ch) & 15) + 1])
+                else
+                    ctx.push(ch)
+                end
+            end
+        end
+        ctx.push('"')
+    elseif valueType == NodeType.ARRAY then
+        local array = v.getArray()
+        ctx.push('[')
+        for i = 1, #array, 1 do
+            local element = Stringify(array[i])
+            ctx.pushString(element)
+            ctx.push(',')
+        end
+        if #array > 1 then
+            ctx.pop()
+        end
+        ctx.push(']')
+    elseif valueType == NodeType.OBJECT then
+        local object = v.getObject()
+        ctx.push('{')
+        local keys = {}
+        for k in pairs(object) do
+            table.insert(keys, k)
+        end
+        table.sort(keys)
+        for _, k in ipairs(keys) do
+            local element = Stringify(object[k])
+            ctx.pushString(k)
+            ctx.push(':')
+            ctx.pushString(element)
+            ctx.push(',')
+        end
+        if #keys > 0 then
+            ctx.pop()
+        end
+        ctx.push('}')
+    else
+        error({ message = ParseResult.PARSE_INVALID_TYPE })
+        ctx.clear()
+    end
+
+    return table.concat(ctx.elements())
+end
+
+function NewEncodeContext()
+    -- Private attributes
+    local stack = {}
+    -- add the char to the tail of stack
+    local function push(ch)
+        stack[#stack + 1] = ch
+    end
+
+    local function pushString(s)
+        for i = 1, string.len(s) do
+            stack[#stack + 1] = s:sub(i, i)
+        end
+    end
+
+    -- retrieve the char from the top of the stack
+    local function pop()
+        local ch = stack[#stack]
+        stack[#stack] = nil
+        return ch
+    end
+
+    local function clear()
+        stack = {}
+    end
+
+    local function elements()
+        return stack
+    end
+
+    local self = {}
+    self.push = push
+    self.pushString = pushString
+    self.pop = pop
+    self.clear = clear
+    self.elements = elements
+
+    return self
+end
+
 return {
     Parse = Parse,
+    Stringify = Stringify,
     ParseResult = ParseResult,
     NodeType = NodeType
 }
