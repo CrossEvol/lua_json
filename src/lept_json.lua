@@ -129,13 +129,6 @@ local function jsonValue()
     return self
 end
 
-local function jsonPair(k, v)
-    return {
-        key = k,
-        value = v
-    }
-end
-
 function Parse(jsonStr)
     local ctx = NewDecodeContext(jsonStr)
     ctx.skipWhitespace()
