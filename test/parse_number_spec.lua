@@ -5,9 +5,9 @@ describe("JSON Parser for number", function()
         local TEST_NUMBER = function(expect, json)
             local result = LeptJson.Parse(json)
             local value, state = result.value, result.state
-            assert_equal(value.getType(), LeptJson.NodeType.NUMBER)
+            assert_equal(value:getType(), LeptJson.NodeType.NUMBER)
             assert_equal(state, LeptJson.ParseResult.PARSE_OK)
-            assert_equal(expect, value.getNumber())
+            assert_equal(expect, value:getNumber())
         end
 
         TEST_NUMBER(0, "0")

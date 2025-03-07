@@ -5,9 +5,9 @@ describe("JSON Parser for string", function()
         local TEST_STRING = function(expect, json)
             local result = LeptJson.Parse(json)
             local value, state = result.value, result.state
-            assert_equal(value.getType(), LeptJson.NodeType.STRING)
+            assert_equal(value:getType(), LeptJson.NodeType.STRING)
             assert_equal(state, LeptJson.ParseResult.PARSE_OK)
-            assert_equal(expect, value.getString())
+            assert_equal(expect, value:getString())
         end
 
         TEST_STRING("", "\"\"")

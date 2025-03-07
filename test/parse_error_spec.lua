@@ -9,7 +9,7 @@ describe("JSON Parser for ERROR", function()
         TEST_PARSE_ERROR = function(err, json)
             local result = LeptJson.Parse(json)
             local value, state = result.value, result.state
-            assert_equal(value.getType(), LeptJson.NodeType.NULL)
+            assert_equal(value:getType(), LeptJson.NodeType.NULL)
             assert_equal(state, err)
         end
     end)
